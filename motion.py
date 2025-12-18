@@ -85,28 +85,33 @@ def isotropic_upsample_and_pad(image, interpolation=sitk.sitkBSpline5):
     """
     original_spacing = image.GetSpacing()
     min_spacing = min(original_spacing)
+    if original_spacing==(min_spacing,min_spacing,min_spacing):
+        # the image is already isotropic
+        resampled_image = image
+    else:
+        # Compute new size to maintain physical extent
+        original_size = image.GetSize()
+        new_size = [
+            int(round(original_size[i] * original_spacing[i] / min_spacing))
+            for i in range(len(original_spacing))
+        ]
 
-    # Compute new size to maintain physical extent
-    original_size = image.GetSize()
-    new_size = [
-        int(round(original_size[i] * original_spacing[i] / min_spacing))
-        for i in range(len(original_spacing))
-    ]
+        # Resample
+        resampled_image = sitk.Resample(
+            image,
+            new_size,
+            sitk.Transform(),  # Identity transform
+            interpolation,
+            image.GetOrigin(),
+            (min_spacing,) * len(original_spacing),
+            image.GetDirection(),
+            0,  # Default pixel value
+            image.GetPixelID(),
+            useNearestNeighborExtrapolator=True,
+        )
+        # set all negative values to 0
+        resampled_image = resampled_image*sitk.Cast(resampled_image>0, resampled_image.GetPixelID())    
 
-    # Resample
-    resampled_image = sitk.Resample(
-        image,
-        new_size,
-        sitk.Transform(),  # Identity transform
-        interpolation,
-        image.GetOrigin(),
-        (min_spacing,) * len(original_spacing),
-        image.GetDirection(),
-        0,  # Default pixel value
-        image.GetPixelID(),
-        useNearestNeighborExtrapolator=True,
-    )
-    resampled_image[resampled_image < 0] = 0
     # Duplicate the outer slice of the image twice to pad it.
     dim = image.GetDimension()
     resampled_image = sitk.MirrorPad(
@@ -152,7 +157,8 @@ def resample_image(reference, moving, transform, interp=sitk.sitkBSpline5):
         sitk.sitkFloat32,
         useNearestNeighborExtrapolator=True,
     )
-    resampled[resampled < 0] = 0
+    # set all negative values to 0
+    resampled = resampled*sitk.Cast(resampled>0, resampled.GetPixelID())    
     return resampled
 
 
@@ -161,7 +167,7 @@ def register_pair(
     moving,
     initial_transform=None,
     fixed_mask=None,
-    fine=False,
+    level=2,
 ):
     """Register moving image to fixed image using Euler3DTransform."""
     registration_method = sitk.ImageRegistrationMethod()
@@ -174,7 +180,7 @@ def register_pair(
     registration_method.SetMetricSamplingStrategy(registration_method.REGULAR)
     registration_method.SetMetricSamplingPercentage(0.95)
 
-    if fine:
+    if level==3:
         registration_method.SetOptimizerAsConjugateGradientLineSearch(
             learningRate=1.0,
             numberOfIterations=50,
@@ -186,7 +192,7 @@ def register_pair(
         )
         registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[2, 2])
         registration_method.SetSmoothingSigmasPerLevel(smoothingSigmas=[0.424628, 0])
-    else:
+    elif level==2:
         registration_method.SetOptimizerAsConjugateGradientLineSearch(
             learningRate=1.0,
             numberOfIterations=20,
@@ -205,6 +211,48 @@ def register_pair(
                 0.424628,
             ]
         )
+    elif level==1:
+        registration_method.SetOptimizerAsConjugateGradientLineSearch(
+            learningRate=1.0,
+            numberOfIterations=5,
+            convergenceMinimumValue=1e-6,
+            convergenceWindowSize=10,
+            estimateLearningRate=registration_method.EachIteration,
+            lineSearchUpperLimit=5.0,
+            maximumStepSizeInPhysicalUnits=fixed.GetSpacing()[0],
+        )
+        registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[8, 4, 4, 4])
+        registration_method.SetSmoothingSigmasPerLevel(
+            smoothingSigmas=[
+                0.424628 * 8,
+                0.424628 * 4,
+                0.424628 * 2,
+                0.424628,
+            ]
+        )
+    elif level==0:
+        registration_method.SetOptimizerAsConjugateGradientLineSearch(
+            learningRate=1.0,
+            numberOfIterations=1,
+            convergenceMinimumValue=1e-6,
+            convergenceWindowSize=10,
+            estimateLearningRate=registration_method.EachIteration,
+            lineSearchUpperLimit=5.0,
+            maximumStepSizeInPhysicalUnits=fixed.GetSpacing()[0],
+        )
+        registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[8, 4, 4, 4])
+        registration_method.SetSmoothingSigmasPerLevel(
+            smoothingSigmas=[
+                0.424628 * 8,
+                0.424628 * 4,
+                0.424628 * 2,
+                0.424628,
+            ]
+        )
+    else:
+        raise
+
+
     registration_method.SetOptimizerScalesFromIndexShift()
 
     if not initial_transform:
@@ -386,7 +434,8 @@ def resample_slice_pair(
             reference.GetPixelID(),
             useNearestNeighborExtrapolator=True,
         )
-        resampled_slice[resampled_slice < 0] = 0
+        # set all negative values to 0
+        resampled_slice = resampled_slice*sitk.Cast(resampled_slice>0, resampled_slice.GetPixelID())    
         if slice_direction == 2:
             output_image[:, :, z] = resampled_slice
         elif slice_direction == 1:
@@ -395,6 +444,60 @@ def resample_slice_pair(
             output_image[z, :, :] = resampled_slice
 
     return output_image
+
+
+def framewise_register_pair(moving_img, ref_img, level=1):
+    # the input can be either a nifti file or an SITK image
+    if isinstance(moving_img, sitk.Image):
+        moving_img = moving_img
+    elif os.path.isfile(moving_img):
+        moving_img = sitk.ReadImage(moving_img, sitk.sitkFloat32)
+    else:
+        raise ValueError(f'{moving_img} is neither a file nor an SITK image.')
+
+    # the input can be either a nifti file or an SITK image
+    if isinstance(ref_img, sitk.Image):
+        ref_img = ref_img
+    elif os.path.isfile(ref_img):
+        ref_img = sitk.ReadImage(ref_img, sitk.sitkFloat32)
+    else:
+        raise ValueError(f'{ref_img} is neither a file nor an SITK image.')
+
+    fixed_upsample = isotropic_upsample_and_pad(ref_img, sitk.sitkBSpline5)
+
+    size_4d = moving_img.GetSize()
+    num_volumes = size_4d[3]
+
+    # Extract 3D volumes
+    volumes = []
+    for i in range(num_volumes):
+        extractor = sitk.ExtractImageFilter()
+        extractor.SetSize([size_4d[0], size_4d[1], size_4d[2], 0])
+        extractor.SetIndex([0, 0, 0, i])
+        volumes.append(extractor.Execute(moving_img))
+
+    del extractor
+
+    transforms = [None] * num_volumes
+    # Parallel Registration
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        with tqdm(total=num_volumes - 1) as pbar:
+            futures = {}
+            for i in range(0, num_volumes):
+                future = executor.submit(
+                    register_pair,
+                    fixed=fixed_upsample,
+                    moving=volumes[i],
+                    fixed_mask=None,
+                    level=level,
+                )
+                futures[future] = i
+            # Collect results
+            for future in concurrent.futures.as_completed(futures):
+                i = futures[future]
+                transforms[i] = future.result()
+                pbar.update(1)
+    return transforms
 
 
 def main(input_file, output_prefix, slice_moco=False, two_pass_slice_moco=False):

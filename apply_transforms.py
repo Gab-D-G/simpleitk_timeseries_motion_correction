@@ -69,8 +69,50 @@ def resample_volume(volume, reference, transform, interpolation=sitk.sitkBSpline
         volume.GetPixelID(),
         useNearestNeighborExtrapolator=True
     )
-    resampled[resampled < 0] = 0
+    resampled = resampled*sitk.Cast(resampled>0, resampled.GetPixelID())    
     return resampled
+
+
+def framewise_resample_volume(input_image, reference_image, transforms, interpolation=sitk.sitkBSpline5):
+    num_volumes = input_image.GetSize()[3]
+    # Extract 3D volumes from input to process in parallel
+    input_volumes = []
+    size_4d = input_image.GetSize()
+    for i in range(num_volumes):
+        extractor = sitk.ExtractImageFilter()
+        extractor.SetSize([size_4d[0], size_4d[1], size_4d[2], 0])
+        extractor.SetIndex([0, 0, 0, i])
+        input_volumes.append(extractor.Execute(input_image))
+    
+    resampled_volumes = [None] * num_volumes
+    
+    # Parallel processing
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        with tqdm(total=num_volumes) as pbar:
+            futures = {}
+            for i in range(num_volumes):
+                future = executor.submit(
+                    resample_volume,
+                    volume=input_volumes[i],
+                    reference=reference_image,
+                    transform=transforms[i],
+                    interpolation=interpolation
+                )
+                futures[future] = i
+            
+            for future in concurrent.futures.as_completed(futures):
+                i = futures[future]
+                try:
+                    resampled_volumes[i] = future.result()
+                except Exception as e:
+                    print(f"Error processing volume {i}: {e}")
+                    # Might want to abort or insert blank?
+                    # For now re-raise to fail fast
+                    raise e
+                pbar.update(1)
+
+    print("Joining series...")
+    return sitk.JoinSeries(resampled_volumes)
 
 
 def main(args):
