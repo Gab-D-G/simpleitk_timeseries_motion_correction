@@ -280,7 +280,7 @@ def register_pair(
     ).GetBackTransform()
 
 
-def register_slice_pair(fixed, moving, slice_direction=2):
+def register_slice_pair(fixed, moving, slice_direction=2, interpolation=sitk.sitkBSpline5):
     """
     Registers each slice of the moving image to the corresponding slice of the fixed image.
     Assumes moving volume has already been registered to the fixed using register_pair
@@ -305,7 +305,7 @@ def register_slice_pair(fixed, moving, slice_direction=2):
             moving_slice = moving[z, :, :]
 
         fixed_slice = isotropic_upsample_and_pad(
-            fixed_slice, interpolation=sitk.sitkBSpline5
+            fixed_slice, interpolation=interpolation
         )
 
         registration_method = sitk.ImageRegistrationMethod()
@@ -446,7 +446,7 @@ def resample_slice_pair(
     return output_image
 
 
-def framewise_register_pair(moving_img, ref_img, level=1):
+def framewise_register_pair(moving_img, ref_img, level=1,interpolation=sitk.sitkBSpline5):
     # the input can be either a nifti file or an SITK image
     if isinstance(moving_img, sitk.Image):
         moving_img = moving_img
@@ -463,7 +463,7 @@ def framewise_register_pair(moving_img, ref_img, level=1):
     else:
         raise ValueError(f'{ref_img} is neither a file nor an SITK image.')
 
-    fixed_upsample = isotropic_upsample_and_pad(ref_img, sitk.sitkBSpline5)
+    fixed_upsample = isotropic_upsample_and_pad(ref_img, interpolation)
 
     size_4d = moving_img.GetSize()
     num_volumes = size_4d[3]
