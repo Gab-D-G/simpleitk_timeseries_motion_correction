@@ -56,7 +56,7 @@ def read_transforms_from_csv(csv_file):
     return transforms
 
 
-def resample_volume(volume, reference, transform, interpolation=sitk.sitkBSpline5):
+def resample_volume(volume, reference, transform, interpolation=sitk.sitkBSpline5, clip_negative=False, extrapolator=False):
     """
     Resamples a single 3D volume to the reference geometry.
     """
@@ -67,13 +67,14 @@ def resample_volume(volume, reference, transform, interpolation=sitk.sitkBSpline
         interpolation,
         0.0,  # Default pixel value
         volume.GetPixelID(),
-        useNearestNeighborExtrapolator=True
+        useNearestNeighborExtrapolator=extrapolator
     )
-    resampled = resampled*sitk.Cast(resampled>0, resampled.GetPixelID())    
+    if clip_negative:
+        resampled = resampled*sitk.Cast(resampled>0, resampled.GetPixelID())    
     return resampled
 
 
-def framewise_resample_volume(input_image, reference_image, transforms, interpolation=sitk.sitkBSpline5):
+def framewise_resample_volume(input_image, reference_image, transforms, interpolation=sitk.sitkBSpline5, clip_negative=False, extrapolator=False):
     num_volumes = input_image.GetSize()[3]
     # Extract 3D volumes from input to process in parallel
     input_volumes = []
@@ -96,7 +97,9 @@ def framewise_resample_volume(input_image, reference_image, transforms, interpol
                     volume=input_volumes[i],
                     reference=reference_image,
                     transform=transforms[i],
-                    interpolation=interpolation
+                    interpolation=interpolation,
+                    clip_negative=clip_negative,
+                    extrapolator=extrapolator,
                 )
                 futures[future] = i
             
