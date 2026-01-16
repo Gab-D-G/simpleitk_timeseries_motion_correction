@@ -151,9 +151,13 @@ def process_frame(vol, vol2, cx, cy, cz, spacing, scale, frame_idx):
         combined = zoom(combined, scale, order=1)
     return combined
 
-def main(input_file, output_file, second_input_file=None, scale=2.0, fps=10):
-    print(f"Loading {input_file}...")
-    img = sitk.ReadImage(input_file)
+def main(input_img, output_file, second_input_img=None, scale=2.0, fps=10):
+    # the input can be either a nifti file or an SITK image
+    if isinstance(input_img, sitk.Image):
+        img = input_img
+    elif os.path.isfile(input_img):
+        print(f"Loading {input_img}...")
+        img = sitk.ReadImage(input_img)
     
     # Get array (t, z, y, x) or (z, y, x)
     arr = sitk.GetArrayFromImage(img)
@@ -170,9 +174,13 @@ def main(input_file, output_file, second_input_file=None, scale=2.0, fps=10):
     print(f"Data shape: {arr.shape}")
     
     arr2 = None
-    if second_input_file:
-        print(f"Loading second input {second_input_file}...")
-        img2 = sitk.ReadImage(second_input_file)
+    if second_input_img:
+        # the input can be either a nifti file or an SITK image
+        if isinstance(second_input_img, sitk.Image):
+            img2 = second_input_img
+        elif os.path.isfile(second_input_img):
+            print(f"Loading second input {second_input_img}...")
+            img2 = sitk.ReadImage(second_input_img)
         arr2 = sitk.GetArrayFromImage(img2)
         if arr2.ndim == 3:
             arr2 = arr2[np.newaxis, ...]
@@ -214,7 +222,7 @@ def main(input_file, output_file, second_input_file=None, scale=2.0, fps=10):
     print(f"Saving to {output_file}...")
     # imageio v3 imwrite supports loop and duration/fps for webp
     # fps is supported by pillow plugin for webp
-    iio.imwrite(output_file, frames, duration=1000/fps, loop=0)
+    iio.imwrite(output_file, frames, duration=int(1000/fps), loop=0)
     print("Done.")
 
 if __name__ == "__main__":
