@@ -208,9 +208,12 @@ def register_pair(
     registration_method.SetOptimizerScalesFromIndexShift()
 
     if not initial_transform:
-        # Find the COM of the fixed image, but only use it to set the center of rotation
+        # A good estimate of the center-of-rotation is essential here
+        # we don't want to be biased by activation or ventricular signal
+        # so we use our otsu binary mask to find the COM
+        binary_mask = make_mask(fixed)
         com_initializer = sitk.CenteredTransformInitializer(
-            sitk.Cast(fixed, sitk.sitkFloat32),
+            sitk.Cast(binary_mask, sitk.sitkFloat32),
             sitk.Cast(moving, sitk.sitkFloat32),
             sitk.Euler3DTransform(),
             sitk.CenteredTransformInitializerFilter.MOMENTS,
@@ -302,9 +305,12 @@ def register_slice_pair(fixed, moving, slice_direction=2):
             ]
         )
 
-        # Find the COM of the fixed image, but only use it to set the center of rotation
+        # A good estimate of the center-of-rotation is essential here
+        # we don't want to be biased by activation or ventricular signal
+        # so we use our otsu binary mask to find the COM
+        binary_mask = make_mask(fixed_slice)
         com_initializer = sitk.CenteredTransformInitializer(
-            sitk.Cast(fixed_slice, sitk.sitkFloat32),
+            sitk.Cast(binary_mask, sitk.sitkFloat32),
             sitk.Cast(moving_slice, sitk.sitkFloat32),
             sitk.Euler2DTransform(),
             sitk.CenteredTransformInitializerFilter.MOMENTS,
