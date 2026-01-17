@@ -208,12 +208,15 @@ def register_pair(
     registration_method.SetOptimizerScalesFromIndexShift()
 
     if not initial_transform:
-        initial_transform = sitk.CenteredTransformInitializer(
+        # Find the COM of the fixed image, but only use it to set the center of rotation
+        com_initializer = sitk.CenteredTransformInitializer(
             sitk.Cast(fixed, sitk.sitkFloat32),
             sitk.Cast(moving, sitk.sitkFloat32),
             sitk.Euler3DTransform(),
             sitk.CenteredTransformInitializerFilter.MOMENTS,
         )
+        initial_transform = sitk.Euler3DTransform()
+        initial_transform.SetCenter(com_initializer.GetCenter())
 
     # Initial transform
     registration_method.SetInitialTransform(initial_transform, inPlace=False)
@@ -299,23 +302,15 @@ def register_slice_pair(fixed, moving, slice_direction=2):
             ]
         )
 
-        try:
-            initial_transform = sitk.CenteredTransformInitializer(
-                sitk.Cast(fixed_slice, sitk.sitkFloat32),
-                sitk.Cast(moving_slice, sitk.sitkFloat32),
-                sitk.Euler2DTransform(),
-                sitk.CenteredTransformInitializerFilter.MOMENTS,
-            )
-        except:
-            print(
-                "Slicewise initial transform center-of-mass estimation failed, using geometry"
-            )
-            initial_transform = sitk.CenteredTransformInitializer(
-                sitk.Cast(fixed_slice, sitk.sitkFloat32),
-                sitk.Cast(moving_slice, sitk.sitkFloat32),
-                sitk.Euler2DTransform(),
-                sitk.CenteredTransformInitializerFilter.GEOMETRY,
-            )
+        # Find the COM of the fixed image, but only use it to set the center of rotation
+        com_initializer = sitk.CenteredTransformInitializer(
+            sitk.Cast(fixed_slice, sitk.sitkFloat32),
+            sitk.Cast(moving_slice, sitk.sitkFloat32),
+            sitk.Euler2DTransform(),
+            sitk.CenteredTransformInitializerFilter.MOMENTS,
+        )
+        initial_transform = sitk.Euler2DTransform()
+        initial_transform.SetCenter(com_initializer.GetCenter())
 
         registration_method.SetInitialTransform(initial_transform, inPlace=False)
 
