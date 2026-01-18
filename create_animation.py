@@ -27,26 +27,10 @@ def annotate_frame(image_array, frame_idx):
     # Text to draw
     text = f"{frame_idx}"
     
-    # Use default font, or try to load one
-    # Default font is often very small.
-    # Try to use a larger font if available, or just scale up?
-    # PIL simplistic font handling...
-    # Let's try to load a potentially available font, or fallback to default.
-    try:
-        # Linux common font path?
-        # DejaVuSans.ttf is common.
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
-    except IOError:
-        try:
-             # Try another one
-             font = ImageFont.truetype("arial.ttf", 20)
-        except IOError:
-             font = ImageFont.load_default()
+
+    font = ImageFont.load_default()
     
     # Calculate text position
-    # textbbox(xy, text, font=None, anchor=None, spacing=4, align='left', direction=None, features=None, language=None, stroke_width=0, embedded_color=False)
-    # pillow < 9.2 might use textsize. Checking env? Assuming modern.
-    # If old PIL, convert to textsize.
     try:
         bbox = draw.textbbox((0, 0), text, font=font)
         text_w = bbox[2] - bbox[0]
@@ -59,8 +43,22 @@ def annotate_frame(image_array, frame_idx):
     x = w - text_w - 5 # 5px padding
     y = h - text_h - 5
     
-    # Draw text with outline/shadow for visibility?
     # Simple white text
+    draw.text((x, y), text, fill=255, font=font)
+    
+    return np.array(img_pil)
+
+def draw_label(image_array, text):
+    """Draw text on the top left of the image"""
+    img_pil = Image.fromarray(image_array)
+    draw = ImageDraw.Draw(img_pil)
+    
+    font = ImageFont.load_default(8)
+    
+    x = 5
+    y = 5
+    
+    # Draw text
     draw.text((x, y), text, fill=255, font=font)
     
     return np.array(img_pil)
@@ -86,23 +84,18 @@ def create_ortho_slice_row(volume, cx, cy, cz, spacing):
     cz = max(0, min(cz, z_dim - 1))
 
     # 1. Sagittal (X-slice) -> (z, y)
-    # volume[:, :, cx]. Flipud to correct orientation (Z up).
     slice_sagittal = np.flipud(volume[:, :, cx])
     # Zoom factors: Z*sp_z / min_sp, Y*sp_y / min_sp
     zoom_sag = (sp_z / min_sp, sp_y / min_sp)
     slice_sagittal = zoom(slice_sagittal, zoom_sag, order=1)
 
     # 2. Coronal (Y-slice) -> (z, x)
-    # volume[:, cy, :]. Flipud to correct orientation (Z up).
     slice_coronal = np.flipud(volume[:, cy, :])
     # Zoom factors: Z*sp_z / min_sp, X*sp_x / min_sp
     zoom_cor = (sp_z / min_sp, sp_x / min_sp)
     slice_coronal = zoom(slice_coronal, zoom_cor, order=1)
 
     # 3. Axial (Z-slice) -> (y, x)
-    # volume[cz, :, :]. Orientation usually OK? Or needs flip?
-    # Usually Anterior is up? If Y=0 is top...
-    # Let's keep raw for now, consistent with previous.
     slice_axial = volume[cz, :, :]
     # Zoom factors: Y*sp_y / min_sp, X*sp_x / min_sp
     zoom_ax = (sp_y / min_sp, sp_x / min_sp)
@@ -122,7 +115,6 @@ def create_ortho_slice_row(volume, cx, cy, cz, spacing):
         if h < max_height:
             pad_top = (max_height - h) // 2
             pad_bottom = max_height - h - pad_top
-            # Pad with zeros (or min value?)
             s_padded = np.pad(s, ((pad_top, pad_bottom), (0, 0)), mode='constant')
             final_slices.append(s_padded)
         else:
@@ -130,18 +122,26 @@ def create_ortho_slice_row(volume, cx, cy, cz, spacing):
 
     return np.hstack(final_slices)
 
-def process_frame(vol, vol2, cx, cy, cz, spacing, scale, frame_idx):
+def process_frame(vol, additional_vols, cx, cy, cz, spacing, scale, frame_idx, labels=None):
     """Helper function for parallel frame processing"""
     row = create_ortho_slice_row(vol, cx, cy, cz, spacing)
     row_norm = normalize_frame(row)
     
-    if vol2 is not None:
-        row2 = create_ortho_slice_row(vol2, cx, cy, cz, spacing)
-        row2_norm = normalize_frame(row2)
-        # Stack vertically
-        combined = np.vstack((row_norm, row2_norm))
-    else:
-        combined = row_norm
+    if labels and len(labels) > 0:
+        row_norm = draw_label(row_norm, labels[0])
+    
+    combined = row_norm
+
+    if additional_vols:
+        for i, vol_add in enumerate(additional_vols):
+            if vol_add is not None:
+                row_add = create_ortho_slice_row(vol_add, cx, cy, cz, spacing)
+                row_add_norm = normalize_frame(row_add)
+                
+                if labels and len(labels) > i + 1:
+                    row_add_norm = draw_label(row_add_norm, labels[i+1])
+                    
+                combined = np.vstack((combined, row_add_norm))
         
     # Annotate the bottom of the image
     combined = annotate_frame(combined, frame_idx)
@@ -151,7 +151,7 @@ def process_frame(vol, vol2, cx, cy, cz, spacing, scale, frame_idx):
         combined = zoom(combined, scale, order=1)
     return combined
 
-def main(input_file, output_file, second_input_file=None, scale=2.0, fps=10):
+def main(input_file, output_file, additional_input_files=None, scale=2.0, fps=10):
     print(f"Loading {input_file}...")
     img = sitk.ReadImage(input_file)
     
@@ -169,20 +169,22 @@ def main(input_file, output_file, second_input_file=None, scale=2.0, fps=10):
     nt, nz, ny, nx = arr.shape
     print(f"Data shape: {arr.shape}")
     
-    arr2 = None
-    if second_input_file:
-        print(f"Loading second input {second_input_file}...")
-        img2 = sitk.ReadImage(second_input_file)
-        arr2 = sitk.GetArrayFromImage(img2)
-        if arr2.ndim == 3:
-            arr2 = arr2[np.newaxis, ...]
-        
-        print(f"Second Data shape: {arr2.shape}")
-        if arr2.shape != arr.shape:
-             print("WARNING: Shapes do not match exactly. Proceeding with assumption that dimensions are compatible for slicing.")
-             # We assume nt is same or we zip?
-             # If nt differs, we might crash on indexing if arr2 is shorter.
-             # Let's trust user assumption "Assume... same dimensions".
+    additional_arrs = []
+    if additional_input_files:
+        for f in additional_input_files:
+            print(f"Loading additional input {f}...")
+            img_add = sitk.ReadImage(f)
+            arr_add = sitk.GetArrayFromImage(img_add)
+            if arr_add.ndim == 3:
+                arr_add = arr_add[np.newaxis, ...]
+            print(f"Additional Data shape: {arr_add.shape}")
+            if arr_add.shape != arr.shape:
+                 print(f"WARNING: Shape of {f} does not match exactly. Proceeding with assumption that dimensions are compatible for slicing.")
+            additional_arrs.append(arr_add)
+    
+    labels = [os.path.basename(input_file)]
+    if additional_input_files:
+        labels.extend([os.path.basename(f) for f in additional_input_files])
     
     # Calculate Center of Mass on the first frame
     print("Calculating center of mass...")
@@ -200,14 +202,27 @@ def main(input_file, output_file, second_input_file=None, scale=2.0, fps=10):
         args_vol = [arr[t] for t in range(nt)]
         args_idx = list(range(nt))
         
-        if arr2 is not None:
-            # Handle case where len(arr2) != nt? User said assume dimensions same.
-            args_vol2 = [arr2[t] for t in range(nt)]
+        if additional_arrs:
+            # Transpose list of arrays to list of timepoints containing list of arrays
+            # additional_arrs is [N_files, T, Z, Y, X] (conceptually, though they are list of numpy arrays)
+            # We want args_additional_vol to be length T, where each element is [vol_file1, vol_file2, ...]
+            
+            # Assuming all have same T as arr
+            args_additional_vols = []
+            for t in range(nt):
+                vols_at_t = []
+                for arr_idx, arr_add in enumerate(additional_arrs):
+                    if t < arr_add.shape[0]:
+                        vols_at_t.append(arr_add[t])
+                    else:
+                        vols_at_t.append(None) # Or handle error
+                args_additional_vols.append(vols_at_t)
         else:
-            args_vol2 = [None] * nt
+            args_additional_vols = [[] for _ in range(nt)]
             
         # map preserves order
-        results = executor.map(process_frame, args_vol, args_vol2, [cx]*nt, [cy]*nt, [cz]*nt, [spacing_zyx]*nt, [scale]*nt, args_idx)
+
+        results = executor.map(process_frame, args_vol, args_additional_vols, [cx]*nt, [cy]*nt, [cz]*nt, [spacing_zyx]*nt, [scale]*nt, args_idx, [labels]*nt)
         
         frames = list(results)
         
@@ -221,10 +236,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create animation from NIfTI timeseries")
     parser.add_argument("input", help="Input NIfTI file")
     parser.add_argument("output", help="Output file (e.g. .webp, .gif, .mp4)")
-    parser.add_argument("--second-input", help="Optional second input NIfTI file (same dimensions) to display as second row")
+    parser.add_argument("--additional-row", action='append', help="Optional additional input NIfTI file(s) (same dimensions) to display as additional rows")
     parser.add_argument("--scale", type=float, default=2.0, help="Scale factor for upsampling (default: 2.0)")
     parser.add_argument("--fps", type=float, default=10, help="Frames per second")
     
     args = parser.parse_args()
     
-    main(args.input, args.output, args.second_input, args.scale, args.fps)
+    main(args.input, args.output, args.additional_row, args.scale, args.fps)
