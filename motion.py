@@ -167,34 +167,39 @@ def register_pair(
     registration_method = sitk.ImageRegistrationMethod()
 
     # Similarity metric and sampling
-    registration_method.SetMetricAsCorrelation()
+    # registration_method.SetMetricAsCorrelation()
     # registration_method.SetMetricAsMeanSquares()
-    # registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=64)
+    registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=32)
+    # registration_method.SetMetricAsJointHistogramMutualInformation(numberOfHistogramBins=32)
     # registration_method.SetMetricSamplingStrategy(registration_method.NONE)
     registration_method.SetMetricSamplingStrategy(registration_method.REGULAR)
-    registration_method.SetMetricSamplingPercentage(0.95)
+    # registration_method.SetMetricSamplingPercentage(0.95)
+    registration_method.MetricUseFixedImageGradientFilterOn()
+    registration_method.MetricUseMovingImageGradientFilterOn()
 
     if fine:
         registration_method.SetOptimizerAsConjugateGradientLineSearch(
-            learningRate=1.0,
-            numberOfIterations=50,
-            convergenceMinimumValue=1e-7,
+            learningRate=0.1,
+            numberOfIterations=100,
+            convergenceMinimumValue=1e-6,
             convergenceWindowSize=10,
-            estimateLearningRate=registration_method.EachIteration,
+            estimateLearningRate=registration_method.Once,
             lineSearchUpperLimit=2.0,
+            lineSearchEpsilon=0.1,
             maximumStepSizeInPhysicalUnits=fixed.GetSpacing()[0],
         )
         registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[2, 2])
         registration_method.SetSmoothingSigmasPerLevel(smoothingSigmas=[0.424628, 0])
     else:
         registration_method.SetOptimizerAsConjugateGradientLineSearch(
-            learningRate=1.0,
-            numberOfIterations=20,
+            learningRate=0.1,
+            numberOfIterations=100,
             convergenceMinimumValue=1e-6,
             convergenceWindowSize=10,
-            estimateLearningRate=registration_method.EachIteration,
-            lineSearchUpperLimit=5.0,
-            maximumStepSizeInPhysicalUnits=fixed.GetSpacing()[0],
+            estimateLearningRate=registration_method.Once,
+            lineSearchUpperLimit=2.0,
+            lineSearchEpsilon=0.1,
+            maximumStepSizeInPhysicalUnits=fixed.GetSpacing()[0]*4,
         )
         registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[8, 4, 4, 4])
         registration_method.SetSmoothingSigmasPerLevel(
@@ -271,30 +276,27 @@ def register_slice_pair(fixed, moving, slice_direction=2):
         # Similarity metric and sampling
         # registration_method.SetMetricAsCorrelation()
         # registration_method.SetMetricAsMeanSquares()
-        registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=32)
+        registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=20)
+        # registration_method.SetMetricAsJointHistogramMutualInformation(numberOfHistogramBins=20)
         registration_method.SetMetricSamplingStrategy(registration_method.REGULAR)
-        registration_method.SetMetricSamplingPercentage(0.95)
+        # registration_method.SetMetricSamplingPercentage(0.95)
+        registration_method.MetricUseFixedImageGradientFilterOn()
+        registration_method.MetricUseMovingImageGradientFilterOn()
 
         # Optimizer
         registration_method.SetOptimizerAsConjugateGradientLineSearch(
-            learningRate=1.0,
-            numberOfIterations=50,
-            convergenceMinimumValue=1e-7,
+            learningRate=0.1,
+            numberOfIterations=100,
+            convergenceMinimumValue=1e-6,
             convergenceWindowSize=10,
-            estimateLearningRate=registration_method.EachIteration,
+            estimateLearningRate=registration_method.Once,
             lineSearchUpperLimit=2.0,
+            lineSearchEpsilon=0.1,
             maximumStepSizeInPhysicalUnits=fixed_slice.GetSpacing()[0],
         )
         registration_method.SetOptimizerScalesFromIndexShift()
 
-        # registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[4, 4, 4, 4])
-        # registration_method.SetSmoothingSigmasPerLevel(
-        #     smoothingSigmas=[0.424628 * 4, 0.424628 * 3, 0.424628 * 2, 0.424628]
-        # )
-
-        # registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[4, 4, 4, 4, 4, 2])
-        registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[1, 1, 1, 1, 1])
-
+        registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[2, 2, 1, 1, 1])
         registration_method.SetSmoothingSigmasPerLevel(
             smoothingSigmas=[
                 0.424628 * 8,
