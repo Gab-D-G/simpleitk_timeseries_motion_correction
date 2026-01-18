@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import argparse
 import numpy as np
 from scipy.spatial.distance import cosine
+from tqdm import tqdm
 
 def compute_metrics(fixed_image, moving_image):
     """
@@ -114,8 +115,7 @@ def main():
         extract_filter = sitk.ExtractImageFilter()
         extract_filter.SetSize([size_4d[0], size_4d[1], size_4d[2], 0])
 
-        for t in range(num_timepoints):
-            print(f"Processing timepoint {t}/{num_timepoints-1}...", end='\r')
+        for t in tqdm(range(num_timepoints), desc=f"Processing {moving_path.split('/')[-1]}"):
             extract_filter.SetIndex([0, 0, 0, t])
             moving_frame = extract_filter.Execute(moving_image_4d)
             
