@@ -151,7 +151,7 @@ def register_pair(
     moving,
     initial_transform=None,
     fixed_mask=None,
-    fine=False,
+    level=3,
 ):
     """Register moving image to fixed image using Euler3DTransform."""
     registration_method = sitk.ImageRegistrationMethod()
@@ -167,7 +167,7 @@ def register_pair(
     registration_method.MetricUseFixedImageGradientFilterOn()
     registration_method.MetricUseMovingImageGradientFilterOn()
 
-    if fine:
+    if level==4:
         registration_method.SetOptimizerAsConjugateGradientLineSearch(
             learningRate=0.1,
             numberOfIterations=100,
@@ -180,7 +180,7 @@ def register_pair(
         )
         registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[2, 2])
         registration_method.SetSmoothingSigmasPerLevel(smoothingSigmas=[0.424628, 0])
-    else:
+    elif level==3:
         registration_method.SetOptimizerAsConjugateGradientLineSearch(
             learningRate=0.1,
             numberOfIterations=100,
@@ -200,6 +200,67 @@ def register_pair(
                 0.424628,
             ]
         )
+    elif level==2:
+        registration_method.SetOptimizerAsConjugateGradientLineSearch(
+            learningRate=1.0,
+            numberOfIterations=20,
+            convergenceMinimumValue=1e-6,
+            convergenceWindowSize=10,
+            estimateLearningRate=registration_method.EachIteration,
+            lineSearchUpperLimit=5.0,
+            maximumStepSizeInPhysicalUnits=fixed.GetSpacing()[0],
+        )
+        registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[8, 4, 4, 4])
+        registration_method.SetSmoothingSigmasPerLevel(
+            smoothingSigmas=[
+                0.424628 * 8,
+                0.424628 * 4,
+                0.424628 * 2,
+                0.424628,
+            ]
+        )
+    elif level==1:
+        registration_method.SetOptimizerAsConjugateGradientLineSearch(
+            learningRate=1.0,
+            numberOfIterations=5,
+            convergenceMinimumValue=1e-6,
+            convergenceWindowSize=10,
+            estimateLearningRate=registration_method.EachIteration,
+            lineSearchUpperLimit=5.0,
+            maximumStepSizeInPhysicalUnits=fixed.GetSpacing()[0],
+        )
+        registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[8, 4, 4, 4])
+        registration_method.SetSmoothingSigmasPerLevel(
+            smoothingSigmas=[
+                0.424628 * 8,
+                0.424628 * 4,
+                0.424628 * 2,
+                0.424628,
+            ]
+        )
+    elif level==0:
+        registration_method.SetOptimizerAsConjugateGradientLineSearch(
+            learningRate=1.0,
+            numberOfIterations=1,
+            convergenceMinimumValue=1e-6,
+            convergenceWindowSize=10,
+            estimateLearningRate=registration_method.EachIteration,
+            lineSearchUpperLimit=5.0,
+            maximumStepSizeInPhysicalUnits=fixed.GetSpacing()[0],
+        )
+        registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[8, 4, 4, 4])
+        registration_method.SetSmoothingSigmasPerLevel(
+            smoothingSigmas=[
+                0.424628 * 8,
+                0.424628 * 4,
+                0.424628 * 2,
+                0.424628,
+            ]
+        )
+    else:
+        raise
+
+
     registration_method.SetOptimizerScalesFromIndexShift()
 
     if not initial_transform:
@@ -707,7 +768,7 @@ def main(input_file, output_prefix, slice_moco=False, two_pass_slice_moco=False)
                     moving=slicewise_resampled[i],
                     initial_transform=transforms[i],
                     fixed_mask=None,
-                    fine=True,
+                    level=4,
                 )
                 futures[future] = i
             # Collect results
