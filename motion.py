@@ -294,7 +294,7 @@ def register_pair(
     ).GetBackTransform()
 
 
-def register_slice_pair(fixed, moving, slice_direction=2):
+def register_slice_pair(fixed, moving, slice_direction=2, interpolation=sitk.sitkBSpline5):
     """
     Registers each slice of the moving image to the corresponding slice of the fixed image.
     Assumes moving volume has already been registered to the fixed using register_pair
@@ -319,7 +319,7 @@ def register_slice_pair(fixed, moving, slice_direction=2):
             moving_slice = moving[z, :, :]
 
         fixed_slice = isotropic_upsample_and_pad(
-            fixed_slice, interpolation=sitk.sitkBSpline5
+            fixed_slice, interpolation=interpolation
         )
 
         registration_method = sitk.ImageRegistrationMethod()
