@@ -71,7 +71,7 @@ def make_mask(image):
     return mask
 
 
-def isotropic_upsample_and_pad(image, interpolation=sitk.sitkBSpline5):
+def isotropic_upsample_and_pad(image, interpolation=sitk.sitkBSpline5, clip_negative=True, extrapolator=True):
     """
     Resample the image to isotropic spacing using the smallest existing spacing.
 
@@ -104,9 +104,10 @@ def isotropic_upsample_and_pad(image, interpolation=sitk.sitkBSpline5):
         image.GetDirection(),
         0,  # Default pixel value
         image.GetPixelID(),
-        useNearestNeighborExtrapolator=True,
+        useNearestNeighborExtrapolator=extrapolator
     )
-    resampled_slice = resampled_slice*sitk.Cast(resampled_slice>0, resampled_slice.GetPixelID())    
+    if clip_negative:
+        resampled_slice = resampled_slice*sitk.Cast(resampled_slice>0, resampled_slice.GetPixelID())    
     # Duplicate the outer slice of the image twice to pad it.
     dim = image.GetDimension()
     resampled_image = sitk.MirrorPad(
@@ -324,7 +325,7 @@ def register_slice_pair(fixed, moving, slice_direction=2):
 
 
 def resample_slice_pair(
-    reference, moving, transforms, slice_direction=2, interp=sitk.sitkBSpline5
+    reference, moving, transforms, slice_direction=2, interp=sitk.sitkBSpline5, clip_negative=True, extrapolator=True
 ):
     """
     Resamples the moving image to the reference image slice-by-slice using the provided transforms.
@@ -373,10 +374,11 @@ def resample_slice_pair(
             interp,
             0.0,
             reference.GetPixelID(),
-            useNearestNeighborExtrapolator=True,
+            useNearestNeighborExtrapolator=extrapolator
         )
-        # set all negative values to 0
-        resampled_slice = resampled_slice*sitk.Cast(resampled_slice>0, resampled_slice.GetPixelID())    
+        if clip_negative:
+            # set all negative values to 0
+            resampled_slice = resampled_slice*sitk.Cast(resampled_slice>0, resampled_slice.GetPixelID())    
         if slice_direction == 2:
             output_image[:, :, z] = resampled_slice
         elif slice_direction == 1:

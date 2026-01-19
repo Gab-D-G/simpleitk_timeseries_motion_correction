@@ -56,7 +56,7 @@ def read_transforms_from_csv(csv_file):
     return transforms
 
 
-def resample_volume(volume, reference, transform, interpolation=sitk.sitkBSpline5):
+def resample_volume(volume, reference, transform, interpolation=sitk.sitkBSpline5, clip_negative=True, extrapolator=True):
     """
     Resamples a single 3D volume to the reference geometry.
     """
@@ -67,9 +67,10 @@ def resample_volume(volume, reference, transform, interpolation=sitk.sitkBSpline
         interpolation,
         0.0,  # Default pixel value
         volume.GetPixelID(),
-        useNearestNeighborExtrapolator=True
+        useNearestNeighborExtrapolator=extrapolator
     )
-    resampled = resampled*sitk.Cast(resampled>0, resampled.GetPixelID())    
+    if clip_negative:
+        resampled = resampled*sitk.Cast(resampled>0, resampled.GetPixelID())    
     return resampled
 
 
