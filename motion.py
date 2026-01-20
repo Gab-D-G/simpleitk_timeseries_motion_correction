@@ -71,7 +71,7 @@ def make_mask(image):
     return mask
 
 
-def isotropic_upsample_and_pad(image, interpolation=sitk.sitkBSpline5, clip_negative=True, extrapolator=True):
+def isotropic_upsample_and_pad(image, interpolation=sitk.sitkBSpline5, clip_negative=True):
     """
     Resample the image to isotropic spacing using the smallest existing spacing.
 
@@ -85,7 +85,7 @@ def isotropic_upsample_and_pad(image, interpolation=sitk.sitkBSpline5, clip_nega
     """
     original_spacing = image.GetSpacing()
     min_spacing = min(original_spacing)
-    if original_spacing==(min_spacing,min_spacing,min_spacing):
+    if original_spacing==image.GetDimension()*(min_spacing,):
         # the image is already isotropic
         resampled_image = image
     else:
@@ -107,7 +107,6 @@ def isotropic_upsample_and_pad(image, interpolation=sitk.sitkBSpline5, clip_nega
             image.GetDirection(),
             0,  # Default pixel value
             image.GetPixelID(),
-            useNearestNeighborExtrapolator=extrapolator
         )
         if clip_negative:
             resampled_image = resampled_image*sitk.Cast(resampled_image>0, resampled_image.GetPixelID())    
@@ -258,7 +257,7 @@ def register_pair(
             ]
         )
     else:
-        raise
+        raise ValueError(f"The input {level} is invalid for level parameter.")
 
 
     registration_method.SetOptimizerScalesFromIndexShift()
@@ -471,6 +470,9 @@ def framewise_register_pair(moving_img, ref_img, level=1,interpolation=sitk.sitk
         raise ValueError(f'{ref_img} is neither a file nor an SITK image.')
 
     fixed_upsample = isotropic_upsample_and_pad(ref_img, interpolation)
+
+    if not moving_img.GetDimension()==4:
+        raise ValueError(f"moving_img input must be 4D, got {moving_img.GetDimension()}D instead")
 
     size_4d = moving_img.GetSize()
     num_volumes = size_4d[3]
