@@ -6,7 +6,7 @@ import numpy as np
 import concurrent.futures
 from tqdm import tqdm
 import csv
-from apply_transforms import resample_volume
+from .apply_transforms import resample_volume
 
 def write_transforms_to_csv(transforms, output_file):
     """
