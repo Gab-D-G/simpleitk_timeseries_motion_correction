@@ -217,8 +217,8 @@ def main(input_img, output_file, additional_input_imgs=None, labels=None, scale=
     frames = []
     print(f"Generating frames (Parallel using {os.cpu_count() or 1} cores)...")
 
-    # Use ProcessPoolExecutor for parallel processing
-    with concurrent.futures.ProcessPoolExecutor() as executor:
+    # Use ThreadPoolExecutor for parallel processing
+    with concurrent.futures.ThreadPoolExecutor() as executor:
         # Prepare arguments for map
         args_vol = [arr[t] for t in range(nt)]
         args_idx = list(range(nt))
