@@ -36,8 +36,6 @@ def make_syn_pyramid(
     iterations_l_l = []
 
     for octave in range(max_octave, min_octave - 1, -1):
-        print(f'octave: {octave}')
-
         shrinks_l = []
         smooths_l = []
         iterations_l = []
