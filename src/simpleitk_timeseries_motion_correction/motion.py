@@ -7,6 +7,7 @@ import concurrent.futures
 from tqdm import tqdm
 import csv
 from .apply_transforms import resample_volume
+from .make_syn_pyramid import make_syn_pyramid
 
 
 def write_transforms_to_csv(transforms, output_file):
@@ -150,6 +151,45 @@ def voxelwise_std(image_list):
     return std_image
 
 
+def estimate_shrinks_sigmas(img, level=2):
+    min_length = min(img.GetSize()[:3])
+    min_spacing = min(img.GetSpacing()[:3])
+    
+    shrinks_l_l, smooths_l_l, iterations_l_l = make_syn_pyramid(
+            min_spacing=min_spacing,
+            min_length=min_length,
+            final_iterations=50,
+            rough=False,
+            close=False,
+        )
+    shrinks_l_l.pop(-1) # taking out the fine last iteration
+    smooths_l_l.pop(-1) # taking out the fine last iteration
+
+    if level==1: # level1: only 1st octave
+        shrinks = shrinks_l_l[0][-2:]
+        smooths = smooths_l_l[0][-2:]
+
+    elif level==2: # level2: only 2nd octave
+        if len(shrinks_l_l)>1: # if there was at least 2 octaves, take 2nd octave
+            shrinks = shrinks_l_l[1][-2:]
+            smooths = smooths_l_l[1][-2:]
+        else:
+            shrinks = shrinks_l_l[0][-2:]
+            smooths = smooths_l_l[0][-2:]
+        
+    elif level>=3: # level3: combined first 3 octaves
+        shrinks = []
+        for shrinks_l in shrinks_l_l[:3]:
+            shrinks += shrinks_l[-2:]
+        smooths = []
+        for smooths_l in smooths_l_l[:3]:
+            smooths += smooths_l[-2:]
+        if level>3: # level4: append a 'fine' step at max resolution
+            shrinks += [1]
+            smooths += [0.0]
+    return shrinks,smooths
+
+
 def register_pair(
     fixed,
     moving,
@@ -259,6 +299,73 @@ def register_pair(
     # registration_method.AddCommand(
     #     sitk.sitkIterationEvent, lambda: command_iteration(registration_method)
     # )
+
+    # Execute registration, pull out Euler3DTransform from wrapper
+    return registration_method.Execute(
+        sitk.Cast(fixed, sitk.sitkFloat32),
+        sitk.Cast(moving, sitk.sitkFloat32),
+    ).GetBackTransform()
+
+
+def register_pair_custom(
+    fixed,
+    moving,
+    shrinks,
+    sigmas,
+    num_iter=5,
+    com_mask=None,
+    initial_transform=None,
+    fixed_mask=None,
+):
+    """Register moving image to fixed image using Euler3DTransform."""
+    registration_method = sitk.ImageRegistrationMethod()
+
+    # Similarity metric and sampling
+    # registration_method.SetMetricAsCorrelation()
+    # registration_method.SetMetricAsMeanSquares()
+    registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=32)
+    # registration_method.SetMetricAsJointHistogramMutualInformation(numberOfHistogramBins=32)
+    # registration_method.SetMetricSamplingStrategy(registration_method.NONE)
+    registration_method.SetMetricSamplingStrategy(registration_method.REGULAR)
+    # registration_method.SetMetricSamplingPercentage(0.95)
+    registration_method.MetricUseFixedImageGradientFilterOn()
+    registration_method.MetricUseMovingImageGradientFilterOn()
+
+    registration_method.SetOptimizerAsConjugateGradientLineSearch(
+        learningRate=1.0,
+        numberOfIterations=num_iter,
+        convergenceMinimumValue=1e-6,
+        convergenceWindowSize=10,
+        estimateLearningRate=registration_method.EachIteration,
+        lineSearchUpperLimit=5.0,
+        maximumStepSizeInPhysicalUnits=fixed.GetSpacing()[0],
+    )
+
+    registration_method.SetShrinkFactorsPerLevel(shrinkFactors=shrinks)
+    registration_method.SetSmoothingSigmasPerLevel(smoothingSigmas=sigmas)
+    
+    registration_method.SetOptimizerScalesFromIndexShift()
+
+    if not initial_transform:
+        if com_mask is None:
+            # A good estimate of the center-of-rotation is essential here
+            # we don't want to be biased by activation or ventricular signal
+            # so we use our otsu binary mask to find the COM
+            com_mask = make_mask(fixed)
+        com_initializer = sitk.CenteredTransformInitializer(
+            sitk.Cast(com_mask, sitk.sitkFloat32),
+            sitk.Cast(moving, sitk.sitkFloat32),
+            sitk.Euler3DTransform(),
+            sitk.CenteredTransformInitializerFilter.MOMENTS,
+        )
+        initial_transform = sitk.Euler3DTransform()
+        initial_transform.SetCenter(com_initializer.GetCenter())
+    
+    # Initial transform
+    registration_method.SetInitialTransform(initial_transform, inPlace=False)
+
+    if fixed_mask:
+        registration_method.SetMetricFixedMask(fixed_mask)
 
     # Execute registration, pull out Euler3DTransform from wrapper
     return registration_method.Execute(
@@ -444,7 +551,7 @@ def resample_slice_pair(
 def framewise_register_pair(
     moving_img,
     ref_img,
-    level=1,
+    level=2,
     interpolation=sitk.sitkBSpline5,
     max_workers=os.cpu_count(),
 ):
@@ -489,6 +596,9 @@ def framewise_register_pair(
 
     del extractor
 
+    # define the shrinking and smoothing based on the upsampled data
+    shrinks, sigmas = estimate_shrinks_sigmas(fixed_upsample, level=level)
+
     com_mask = make_mask(fixed_upsample)
     transforms = [None] * num_volumes
     # Parallel Registration
@@ -497,12 +607,15 @@ def framewise_register_pair(
             futures = {}
             for i in range(0, num_volumes):
                 future = executor.submit(
-                    register_pair,
+                    register_pair_custom,
                     fixed=fixed_upsample,
                     moving=volumes[i],
+                    shrinks=shrinks,
+                    sigmas=sigmas,
+                    num_iter=5,
                     com_mask=com_mask,
+                    initial_transform=None,
                     fixed_mask=None,
-                    level=level,
                 )
                 futures[future] = i
             # Collect results
