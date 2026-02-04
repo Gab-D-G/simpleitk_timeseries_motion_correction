@@ -158,27 +158,18 @@ def process_frame(
     return combined
 
 
-def main(input_img, output_file, additional_input_imgs=None, labels=None, scale=2.0, fps=10):
+def generate_animation(first_img, output_file, additional_input_imgs=None, labels=None, scale=2.0, fps=10):
 
     # prepare list of axis labels
-    if not labels is None:
+    if labels:
         # read file name if the labels list are files
         labels = [os.path.basename(label) if os.path.isfile(label) else str(label) for label in labels]
 
-    # the input can be either a nifti file or an SITK image
-    if isinstance(input_img, sitk.Image):
-        img = input_img
-    elif os.path.isfile(input_img):
-        print(f"Loading {input_img}...")
-        img = sitk.ReadImage(input_img)
-    else:
-        raise ValueError(f"input_img must be a sitk.Image or a valid file path, got: {input_img}")
-
     # Get array (t, z, y, x) or (z, y, x)
-    arr = sitk.GetArrayFromImage(img)
+    arr = sitk.GetArrayFromImage(first_img)
 
     # Get Spacing (x, y, z) -> need (z, y, x)
-    spacing_xyz = img.GetSpacing()
+    spacing_xyz = first_img.GetSpacing()
     spacing_zyx = (spacing_xyz[2], spacing_xyz[1], spacing_xyz[0])
     print(f"Image Spacing (z, y, x): {spacing_zyx}")
 
@@ -191,24 +182,13 @@ def main(input_img, output_file, additional_input_imgs=None, labels=None, scale=
     additional_arrs = []
     if additional_input_imgs:
         for img_add in additional_input_imgs:
-            # the input can be either a nifti file or an SITK image
-            img_identifier = img_add if isinstance(img_add, str) else repr(img_add)
-            if isinstance(img_add, sitk.Image):
-                pass  # Already a sitk.Image
-            elif os.path.isfile(img_add):
-                 fname = img_add
-                 print(f"Loading second input {img_add}...")
-                 img_add = sitk.ReadImage(img_add)
-            else:
-                raise ValueError(f"additional_input_imgs entries must be sitk.Image or valid file paths, got: {img_add}")
-
             arr_add = sitk.GetArrayFromImage(img_add)
             if arr_add.ndim == 3:
                 arr_add = arr_add[np.newaxis, ...]
             print(f"Additional Data shape: {arr_add.shape}")
             if arr_add.shape != arr.shape:
                 print(
-                    f"WARNING: Shape of {img_identifier} does not match exactly. Proceeding with assumption that dimensions are compatible for slicing."
+                    f"WARNING: Shape of {repr(img_add)} does not match exactly. Proceeding with assumption that dimensions are compatible for slicing."
                 )
             additional_arrs.append(arr_add)
 
@@ -296,4 +276,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(args.input, args.output, args.additional_row, args.labels, args.scale, args.fps)
+    print(f"Loading input images...")
+    first_img = sitk.ReadImage(args.input) # load as SITK image
+    additional_input_imgs = [sitk.ReadImage(f) for f in args.additional_row] # create list of SITK images
+
+    generate_animation(first_img, args.output, additional_input_imgs, args.labels, args.scale, args.fps)
