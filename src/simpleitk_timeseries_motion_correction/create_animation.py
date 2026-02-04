@@ -171,7 +171,8 @@ def main(input_img, output_file, additional_input_imgs=None, labels=None, scale=
     elif os.path.isfile(input_img):
         print(f"Loading {input_img}...")
         img = sitk.ReadImage(input_img)
-
+    else:
+        raise ValueError(f"input_img must be a sitk.Image or a valid file path, got: {input_img}")
 
     # Get array (t, z, y, x) or (z, y, x)
     arr = sitk.GetArrayFromImage(img)
@@ -191,11 +192,15 @@ def main(input_img, output_file, additional_input_imgs=None, labels=None, scale=
     if additional_input_imgs:
         for img_add in additional_input_imgs:
             # the input can be either a nifti file or an SITK image
+            img_identifier = img_add if isinstance(img_add, str) else repr(img_add)
             if isinstance(img_add, sitk.Image):
-                img_add = img_add
+                pass  # Already a sitk.Image
             elif os.path.isfile(img_add):
-                print(f"Loading second input {img_add}...")
-                img_add = sitk.ReadImage(img_add)
+                 fname = img_add
+                 print(f"Loading second input {img_add}...")
+                 img_add = sitk.ReadImage(img_add)
+            else:
+                raise ValueError(f"additional_input_imgs entries must be sitk.Image or valid file paths, got: {img_add}")
 
             arr_add = sitk.GetArrayFromImage(img_add)
             if arr_add.ndim == 3:
@@ -203,7 +208,7 @@ def main(input_img, output_file, additional_input_imgs=None, labels=None, scale=
             print(f"Additional Data shape: {arr_add.shape}")
             if arr_add.shape != arr.shape:
                 print(
-                    f"WARNING: Shape of {img_add} does not match exactly. Proceeding with assumption that dimensions are compatible for slicing."
+                    f"WARNING: Shape of {img_identifier} does not match exactly. Proceeding with assumption that dimensions are compatible for slicing."
                 )
             additional_arrs.append(arr_add)
 
