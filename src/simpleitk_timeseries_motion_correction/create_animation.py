@@ -166,7 +166,7 @@ def generate_animation(first_img, output_file, additional_input_imgs=None, label
         labels = [os.path.basename(label) if os.path.isfile(label) else str(label) for label in labels]
 
     # Get array (t, z, y, x) or (z, y, x)
-    arr = sitk.GetArrayFromImage(first_img)
+    arr = sitk.GetArrayViewFromImage(first_img)
 
     # Get Spacing (x, y, z) -> need (z, y, x)
     spacing_xyz = first_img.GetSpacing()
@@ -182,7 +182,7 @@ def generate_animation(first_img, output_file, additional_input_imgs=None, label
     additional_arrs = []
     if additional_input_imgs:
         for img_add in additional_input_imgs:
-            arr_add = sitk.GetArrayFromImage(img_add)
+            arr_add = sitk.GetArrayViewFromImage(img_add)
             if arr_add.ndim == 3:
                 arr_add = arr_add[np.newaxis, ...]
             print(f"Additional Data shape: {arr_add.shape}")
@@ -276,8 +276,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    print(f"Loading input images...")
+    print("Loading input images...")
     first_img = sitk.ReadImage(args.input) # load as SITK image
-    additional_input_imgs = [sitk.ReadImage(f) for f in args.additional_row] # create list of SITK images
+    # create list of SITK images
+    additional_input_imgs = [sitk.ReadImage(f) for f in args.additional_row] if args.additional_row else None
 
     generate_animation(first_img, args.output, additional_input_imgs, args.labels, args.scale, args.fps)
