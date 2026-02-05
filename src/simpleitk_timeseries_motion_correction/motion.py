@@ -268,9 +268,87 @@ def register_pair(
 
 
 def register_slice_pair(
-    fixed, 
+    moving_slice, 
+    fixed_slice,
+    com_mask=None
+):
+    """
+    Registers a slice of the moving image to the corresponding slice of the fixed image.
+    Assumes moving volume has already been registered to the fixed using register_pair
+    and appropriately resampled.
+    """
+
+    registration_method = sitk.ImageRegistrationMethod()
+
+    # Similarity metric and sampling
+    # registration_method.SetMetricAsCorrelation()
+    # registration_method.SetMetricAsMeanSquares()
+    registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=20)
+    # registration_method.SetMetricAsJointHistogramMutualInformation(numberOfHistogramBins=20)
+    registration_method.SetMetricSamplingStrategy(registration_method.REGULAR)
+    # registration_method.SetMetricSamplingPercentage(0.95)
+    registration_method.MetricUseFixedImageGradientFilterOn()
+    registration_method.MetricUseMovingImageGradientFilterOn()
+
+    # Optimizer
+    registration_method.SetOptimizerAsConjugateGradientLineSearch(
+        learningRate=0.1,
+        numberOfIterations=100,
+        convergenceMinimumValue=1e-6,
+        convergenceWindowSize=10,
+        estimateLearningRate=registration_method.Once,
+        lineSearchUpperLimit=2.0,
+        lineSearchEpsilon=0.1,
+        maximumStepSizeInPhysicalUnits=fixed_slice.GetSpacing()[0],
+    )
+    registration_method.SetOptimizerScalesFromIndexShift()
+
+    registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[2, 2, 1, 1, 1])
+    registration_method.SetSmoothingSigmasPerLevel(
+        smoothingSigmas=[
+            0.424628 * 8,
+            0.424628 * 4,
+            0.424628 * 2,
+            0.424628,
+            0,
+        ]
+    )
+
+    if not com_mask:
+        # A good estimate of the center-of-rotation is essential here
+        # we don't want to be biased by activation or ventricular signal
+        # so we use our otsu binary mask to find the COM
+        com_mask = make_mask(fixed_slice)
+
+    com_initializer = sitk.CenteredTransformInitializer(
+        sitk.Cast(com_mask, sitk.sitkFloat32),
+        sitk.Cast(moving_slice, sitk.sitkFloat32),
+        sitk.Euler2DTransform(),
+        sitk.CenteredTransformInitializerFilter.MOMENTS,
+    )
+    initial_transform = sitk.Euler2DTransform()
+    initial_transform.SetCenter(com_initializer.GetCenter())
+
+    registration_method.SetInitialTransform(initial_transform, inPlace=False)
+
+    # Execute registration
+    # If the registration fails, return the identity transform
+    try:
+        final_transform = registration_method.Execute(
+            sitk.Cast(fixed_slice, sitk.sitkFloat32),
+            sitk.Cast(moving_slice, sitk.sitkFloat32),
+        ).GetBackTransform()
+    except Exception as e:
+        print(f"Slicewise registration exception: {e}, returning identity transform")
+        final_transform = sitk.Euler2DTransform()
+
+    return final_transform
+
+
+def slicewise_registration(
     moving, 
-    com_mask=None,
+    fixed,
+    inverse_transform, # this should be the transform that moves the fixed image to the moving volume
     slice_direction=2, 
     interpolation=sitk.sitkBSpline5,
 ):
@@ -279,91 +357,44 @@ def register_slice_pair(
     Assumes moving volume has already been registered to the fixed using register_pair
     and appropriately resampled.
     """
-    fixed_size = fixed.GetSize()
-    moving_size = moving.GetSize()
 
+    # first move the fixed reference back to the individual moving volume
+    fixed_moved=resample_volume(
+        volume=fixed,
+        reference=moving,
+        transform=inverse_transform,
+        interpolation=interpolation,
+        clip_negative=True,
+        extrapolator=True,        
+    )
+
+    fixed_size = fixed_moved.GetSize()
     num_slices = fixed_size[slice_direction]
     slice_transforms = []
 
     for z in range(num_slices):
         # Extract 2D slices
         if slice_direction == 2:
-            fixed_slice = fixed[:, :, z]
+            fixed_slice = fixed_moved[:, :, z]
             moving_slice = moving[:, :, z]
         elif slice_direction == 1:
-            fixed_slice = fixed[:, z, :]
+            fixed_slice = fixed_moved[:, z, :]
             moving_slice = moving[:, z, :]
         elif slice_direction == 0:
-            fixed_slice = fixed[z, :, :]
+            fixed_slice = fixed_moved[z, :, :]
             moving_slice = moving[z, :, :]
 
         fixed_slice = isotropic_upsample_and_pad(
             fixed_slice, interpolation=interpolation
         )
+        com_mask = make_mask(fixed_slice)
 
-        registration_method = sitk.ImageRegistrationMethod()
-
-        # Similarity metric and sampling
-        # registration_method.SetMetricAsCorrelation()
-        # registration_method.SetMetricAsMeanSquares()
-        registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=20)
-        # registration_method.SetMetricAsJointHistogramMutualInformation(numberOfHistogramBins=20)
-        registration_method.SetMetricSamplingStrategy(registration_method.REGULAR)
-        # registration_method.SetMetricSamplingPercentage(0.95)
-        registration_method.MetricUseFixedImageGradientFilterOn()
-        registration_method.MetricUseMovingImageGradientFilterOn()
-
-        # Optimizer
-        registration_method.SetOptimizerAsConjugateGradientLineSearch(
-            learningRate=0.1,
-            numberOfIterations=100,
-            convergenceMinimumValue=1e-6,
-            convergenceWindowSize=10,
-            estimateLearningRate=registration_method.Once,
-            lineSearchUpperLimit=2.0,
-            lineSearchEpsilon=0.1,
-            maximumStepSizeInPhysicalUnits=fixed_slice.GetSpacing()[0],
+        slice_transform = register_slice_pair(
+            moving_slice, 
+            fixed_slice,
+            com_mask=com_mask
         )
-        registration_method.SetOptimizerScalesFromIndexShift()
-
-        registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[2, 2, 1, 1, 1])
-        registration_method.SetSmoothingSigmasPerLevel(
-            smoothingSigmas=[
-                0.424628 * 8,
-                0.424628 * 4,
-                0.424628 * 2,
-                0.424628,
-                0,
-            ]
-        )
-
-        if not com_mask:
-            # A good estimate of the center-of-rotation is essential here
-            # we don't want to be biased by activation or ventricular signal
-            # so we use our otsu binary mask to find the COM
-            com_mask = make_mask(fixed_slice)
-        com_initializer = sitk.CenteredTransformInitializer(
-            sitk.Cast(com_mask, sitk.sitkFloat32),
-            sitk.Cast(moving_slice, sitk.sitkFloat32),
-            sitk.Euler2DTransform(),
-            sitk.CenteredTransformInitializerFilter.MOMENTS,
-        )
-        initial_transform = sitk.Euler2DTransform()
-        initial_transform.SetCenter(com_initializer.GetCenter())
-
-        registration_method.SetInitialTransform(initial_transform, inPlace=False)
-
-        # Execute registration
-        # If the registration fails, return the identity transform
-        try:
-            final_transform = registration_method.Execute(
-                sitk.Cast(fixed_slice, sitk.sitkFloat32),
-                sitk.Cast(moving_slice, sitk.sitkFloat32),
-            ).GetBackTransform()
-        except Exception as e:
-            print(f"Slicewise registration exception: {e}, returning identity transform")
-            final_transform = sitk.Euler2DTransform()
-        slice_transforms.append(final_transform)
+        slice_transforms.append(slice_transform)
 
     return slice_transforms
 
@@ -625,11 +656,12 @@ def main(input_file, output_prefix, slice_moco=False, two_pass_slice_moco=False)
                 futures = {}
                 for i in range(0, num_volumes):
                     future = executor.submit(
-                        register_slice_pair,
-                        fixed=resample_volume(
-                            mean_image, volumes[i], transforms[i].GetInverse()
-                        ),
+                        slicewise_registration,
                         moving=volumes[i],
+                        fixed=mean_image,
+                        inverse_transform=transforms[i].GetInverse(),
+                        slice_direction=2, 
+                        interpolation=sitk.sitkBSpline5,
                     )
                     futures[future] = i
                 # Collect results
@@ -752,11 +784,12 @@ def main(input_file, output_prefix, slice_moco=False, two_pass_slice_moco=False)
                     futures = {}
                     for i in range(0, num_volumes):
                         future = executor.submit(
-                            register_slice_pair,
-                            fixed=resample_volume(
-                                mean_image, volumes[i], transforms[i].GetInverse()
-                            ),
+                            slicewise_registration,
                             moving=volumes[i],
+                            fixed=mean_image,
+                            inverse_transform=transforms[i].GetInverse(),
+                            slice_direction=2, 
+                            interpolation=sitk.sitkBSpline5,
                         )
                         futures[future] = i
                     # Collect results
