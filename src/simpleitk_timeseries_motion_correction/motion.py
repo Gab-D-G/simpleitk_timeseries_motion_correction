@@ -62,12 +62,15 @@ def command_iteration2(method):
 
 
 def make_mask(image):
+    dim = image.GetDimension()
+    erode_radius = [1] * dim
+    dilate_radius = [2] * dim
     otsu = sitk.OtsuMultipleThresholds(image, 4, valleyEmphasis=True)
     otsu[otsu > 0.5] = 1
-    otsu = sitk.BinaryErode(otsu, [1, 1, 1])
+    otsu = sitk.BinaryErode(otsu, erode_radius)
     components = sitk.ConnectedComponent(otsu)
     mask = sitk.RelabelComponent(components) == 1
-    mask = sitk.BinaryDilate(mask, [2, 2, 2])
+    mask = sitk.BinaryDilate(mask, dilate_radius)
     mask = sitk.BinaryFillhole(mask)
     return mask
 
