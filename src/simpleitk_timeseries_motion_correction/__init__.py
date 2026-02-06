@@ -40,8 +40,8 @@ from .create_animation import (
 )
 
 # Estimate registration parameters
-from .make_syn_pyramid import (
-    make_syn_pyramid,
+from .make_pyramid import (
+    make_pyramid,
 )
 
 __all__ = [
@@ -67,5 +67,5 @@ __all__ = [
     "create_ortho_slice_row",
     "normalize_frame",
     # Estimate registration parameters
-    "make_syn_pyramid",    
+    "make_pyramid",    
 ]

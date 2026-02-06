@@ -1,6 +1,6 @@
 import math
 
-def make_syn_pyramid(
+def make_pyramid(
     min_spacing,
     min_length,
     final_iterations=50,

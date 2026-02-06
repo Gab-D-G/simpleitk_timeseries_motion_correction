@@ -7,7 +7,7 @@ import concurrent.futures
 from tqdm import tqdm
 import csv
 from .apply_transforms import resample_volume
-from .make_syn_pyramid import make_syn_pyramid
+from .make_pyramid import make_pyramid
 
 def write_transforms_to_csv(transforms, output_file):
     """
@@ -157,7 +157,7 @@ def estimate_shrinks_sigmas(img, level=2):
     min_length = min(img.GetSize()[:3])
     min_spacing = min(img.GetSpacing()[:3])
     
-    shrinks_l_l, smooths_l_l, iterations_l_l = make_syn_pyramid(
+    shrinks_l_l, smooths_l_l, iterations_l_l = make_pyramid(
             min_spacing=min_spacing,
             min_length=min_length,
             final_iterations=50,
