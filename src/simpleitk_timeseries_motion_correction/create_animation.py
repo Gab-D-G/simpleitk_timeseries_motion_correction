@@ -10,10 +10,19 @@ from scipy.ndimage import zoom, center_of_mass
 from PIL import Image, ImageDraw, ImageFont
 
 
-def normalize_frame(frame):
-    """Normalize frame to 0-255 uint8"""
-    f_min = frame.min()
-    f_max = frame.max()
+def normalize_frame(frame, intensity_range=None, percentile_range=(0, 100)):
+    """
+    Normalize frame to 0-255 uint8. If intensity_range=(vmin, vmax) is provided, this fixed range is used.
+    Otherwise, the range is estimated from the frame itself, from the (low, high) percentile_range (by default,
+    its min and max). Values outside the range are clipped.
+    """
+    if intensity_range is not None:
+        f_min, f_max = intensity_range
+    elif tuple(percentile_range) == (0, 100):
+        f_min, f_max = frame.min(), frame.max()
+    else:
+        f_min, f_max = np.percentile(frame, percentile_range)
+    frame = np.clip(frame, f_min, f_max)
     if f_max != f_min:
         frame = (frame - f_min) / (f_max - f_min)
     else:
@@ -127,11 +136,12 @@ def create_ortho_slice_row(volume, cx, cy, cz, spacing):
 
 
 def process_frame(
-    vol, additional_vols, cx, cy, cz, spacing, scale, frame_idx, labels=None
+    vol, additional_vols, cx, cy, cz, spacing, scale, frame_idx, labels=None, intensity_range=None,
+    percentile_range=(0, 100)
 ):
     """Helper function for parallel frame processing"""
     row = create_ortho_slice_row(vol, cx, cy, cz, spacing)
-    row_norm = normalize_frame(row)
+    row_norm = normalize_frame(row, intensity_range, percentile_range)
 
     if labels and len(labels) > 0:
         row_norm = draw_label(row_norm, labels[0])
@@ -142,7 +152,7 @@ def process_frame(
         for i, vol_add in enumerate(additional_vols):
             if vol_add is not None:
                 row_add = create_ortho_slice_row(vol_add, cx, cy, cz, spacing)
-                row_add_norm = normalize_frame(row_add)
+                row_add_norm = normalize_frame(row_add, intensity_range, percentile_range)
 
                 if labels and len(labels) > i + 1:
                     row_add_norm = draw_label(row_add_norm, labels[i + 1])
@@ -158,7 +168,27 @@ def process_frame(
     return combined
 
 
-def main(input_img, output_file, additional_input_imgs=None, labels=None, scale=2.0, fps=10):
+def global_percentile_range(arrs, cx, cy, cz, percentile_range):
+    """
+    Computes a single intensity range from the (low, high) percentiles of the voxels displayed in the video (the
+    three orthogonal slices at cx, cy, cz), across all frames of all the (t, z, y, x) arrays provided.
+    """
+    displayed = []
+    for arr in arrs:
+        displayed += [arr[:, :, :, cx].ravel(), arr[:, :, cy, :].ravel(), arr[:, cz, :, :].ravel()]
+    vmin, vmax = np.percentile(np.concatenate(displayed), percentile_range)
+    return (float(vmin), float(vmax))
+
+
+def main(input_img, output_file, additional_input_imgs=None, labels=None, scale=2.0, fps=10,
+         percentile_range=(0, 100), framewise_scaling=True):
+    """
+    percentile_range: (low, high) percentiles defining the intensity range used for scaling to 0-255 (values
+        outside are clipped). The default (0, 100) is the min and max.
+    framewise_scaling: if True (default), the intensity range is estimated separately for each row of each frame.
+        If False, a single range is estimated across all frames and rows, from the displayed voxels, so that
+        intensities are comparable across frames and rows (e.g. global signal changes remain visible).
+    """
 
     # prepare list of axis labels
     if not labels is None:
@@ -214,6 +244,12 @@ def main(input_img, output_file, additional_input_imgs=None, labels=None, scale=
     cz, cy, cx = int(round(com_z)), int(round(com_y)), int(round(com_x))
     print(f"Center of Mass indices: x={cx}, y={cy}, z={cz}")
 
+    if framewise_scaling:
+        intensity_range = None
+    else:
+        intensity_range = global_percentile_range([arr] + additional_arrs, cx, cy, cz, percentile_range)
+        print(f"Global intensity range from percentiles {tuple(percentile_range)}: {intensity_range}")
+
     frames = []
     print(f"Generating frames (Parallel using {os.cpu_count() or 1} cores)...")
 
@@ -254,6 +290,8 @@ def main(input_img, output_file, additional_input_imgs=None, labels=None, scale=
             [scale] * nt,
             args_idx,
             [labels] * nt,
+            [intensity_range] * nt,
+            [percentile_range] * nt,
         )
 
         frames = list(results)
@@ -288,7 +326,23 @@ if __name__ == "__main__":
         help="Scale factor for upsampling (default: 2.0)",
     )
     parser.add_argument("--fps", type=float, default=10, help="Frames per second")
+    parser.add_argument(
+        "--percentile-range",
+        type=float,
+        nargs=2,
+        default=(0, 100),
+        metavar=("LOW", "HIGH"),
+        help="Percentiles defining the intensity range used for scaling (e.g. --percentile-range 1 99). "
+        "Values outside are clipped. (default: 0 100, i.e. min and max)",
+    )
+    parser.add_argument(
+        "--global-scaling",
+        dest="framewise_scaling",
+        action="store_false",
+        help="Estimate a single intensity range across all frames and rows, instead of separately for each "
+        "frame (default: framewise scaling).",
+    )
 
     args = parser.parse_args()
 
-    main(args.input, args.output, args.additional_row, args.labels, args.scale, args.fps)
+    main(args.input, args.output, args.additional_row, args.labels, args.scale, args.fps, args.percentile_range, args.framewise_scaling)
